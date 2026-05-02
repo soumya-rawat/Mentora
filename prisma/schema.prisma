@@ -1,0 +1,148 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id                 String    @id @default(cuid())
+  name               String
+  email              String    @unique
+  hashedPassword     String
+  onboardingComplete Boolean   @default(false)
+  yearOfStudy        Int?
+  college            String?
+  collegeTier        String?
+  branch             String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  onboardingResponse OnboardingResponse?
+  recommendations    RoleRecommendation[]
+  roadmaps           Roadmap[]
+  resumeUploads      ResumeUpload[]
+  streakLogs         StreakLog[]
+
+  @@index([email])
+}
+
+model OnboardingResponse {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  answers   Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model RoleRecommendation {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roleSlug       String
+  totalScore     Float
+  skillScore     Float
+  interestScore  Float
+  aptitudeScore  Float
+  marketScore    Float
+  matchingSkills Json
+  gapSkills      Json
+  explanation    String   @db.Text
+  readinessLevel String
+  createdAt      DateTime @default(now())
+
+  @@unique([userId, roleSlug])
+  @@index([userId])
+}
+
+model Roadmap {
+  id         String      @id @default(cuid())
+  userId     String
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roleSlug   String
+  isActive   Boolean     @default(true)
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  milestones Milestone[]
+
+  @@index([userId])
+  @@index([userId, isActive])
+}
+
+model Milestone {
+  id             String   @id @default(cuid())
+  roadmapId      String
+  roadmap        Roadmap  @relation(fields: [roadmapId], references: [id], onDelete: Cascade)
+  order          Int
+  title          String
+  description    String   @db.Text
+  estimatedWeeks Int
+  category       String
+  difficulty     String
+  status         String   @default("locked")
+  tasks          Task[]
+
+  @@index([roadmapId])
+  @@index([roadmapId, order])
+}
+
+model Task {
+  id             String    @id @default(cuid())
+  milestoneId    String
+  milestone      Milestone @relation(fields: [milestoneId], references: [id], onDelete: Cascade)
+  title          String
+  description    String    @db.Text
+  type           String
+  resourceUrl    String?
+  resourceLabel  String?
+  estimatedHours Float
+  completed      Boolean   @default(false)
+  completedAt    DateTime?
+  order          Int
+
+  @@index([milestoneId])
+  @@index([completedAt])
+}
+
+model ResumeUpload {
+  id            String           @id @default(cuid())
+  userId        String
+  user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fileName      String
+  extractedText String           @db.Text
+  blobUrl       String?
+  wordCount     Int
+  createdAt     DateTime         @default(now())
+  analyses      ResumeAnalysis[]
+
+  @@index([userId])
+}
+
+model ResumeAnalysis {
+  id              String       @id @default(cuid())
+  resumeUploadId  String
+  resumeUpload    ResumeUpload @relation(fields: [resumeUploadId], references: [id], onDelete: Cascade)
+  targetRoleSlug  String
+  atsScore        Float
+  keywordMatches  Json
+  sectionScores   Json
+  suggestions     Json
+  feedback        String       @db.Text
+  createdAt       DateTime     @default(now())
+
+  @@index([resumeUploadId])
+}
+
+model StreakLog {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date      DateTime @db.Date
+  taskCount Int      @default(1)
+
+  @@unique([userId, date])
+  @@index([userId, date(sort: Desc)])
+}
