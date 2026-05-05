@@ -117,20 +117,43 @@ model ResumeUpload {
   wordCount     Int
   createdAt     DateTime         @default(now())
   analyses      ResumeAnalysis[]
+  jdMatches     JDMatch[]
 
   @@index([userId])
 }
 
 model ResumeAnalysis {
+  id               String       @id @default(cuid())
+  resumeUploadId   String
+  resumeUpload     ResumeUpload @relation(fields: [resumeUploadId], references: [id], onDelete: Cascade)
+  targetRoleSlug   String
+  atsScore         Float
+  keywordMatches   Json
+  sectionScores    Json
+  suggestions      Json
+  feedback         String       @db.Text
+  bulletAnalysis   Json?
+  strengths        Json?
+  weaknesses       Json?
+  rewrittenBullets Json?
+  smartSuggestions  Json?
+  domain           Json?
+  formattingIssues Json?
+  createdAt        DateTime     @default(now())
+
+  @@index([resumeUploadId])
+}
+
+model JDMatch {
   id              String       @id @default(cuid())
   resumeUploadId  String
   resumeUpload    ResumeUpload @relation(fields: [resumeUploadId], references: [id], onDelete: Cascade)
-  targetRoleSlug  String
-  atsScore        Float
-  keywordMatches  Json
-  sectionScores   Json
-  suggestions     Json
-  feedback        String       @db.Text
+  jobDescription  String       @db.Text
+  matchScore      Float
+  matchedSkills   Json
+  missingSkills   Json
+  weakSkills      Json
+  aiSuggestions   String       @db.Text
   createdAt       DateTime     @default(now())
 
   @@index([resumeUploadId])

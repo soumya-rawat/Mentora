@@ -14,26 +14,57 @@ import {
   XCircle,
   AlertCircle,
   Lightbulb,
+  FileSearch,
 } from "lucide-react";
 import { ROLES } from "@/lib/constants/roles";
 import { cn } from "@/lib/utils";
-import { KeywordMatch, ResumeSectionScore } from "@/types";
+import {
+  KeywordMatch,
+  ResumeSectionScore,
+  BulletAnalysis,
+  ResumeStrength,
+  ResumeWeakness,
+  RewrittenBullet,
+  SmartSuggestion,
+  JDMatchResult,
+  DomainClassification,
+} from "@/types";
+
+import { BulletAnalysisCard } from "@/components/resume/bullet-analysis-card";
+import { StrengthsWeaknesses } from "@/components/resume/strengths-weaknesses";
+import { RewrittenBullets } from "@/components/resume/rewritten-bullets";
+import { SmartSuggestions } from "@/components/resume/smart-suggestions";
+import { JDMatchCard } from "@/components/resume/jd-match-card";
+import { JDInput } from "@/components/resume/jd-input";
+import { DomainBadge } from "@/components/resume/domain-badge";
 
 interface AnalysisResult {
+  id: string;
   atsScore: number;
   keywordMatches: KeywordMatch[];
   sectionScores: ResumeSectionScore[];
   suggestions: string[];
   feedback: string;
+  bulletAnalysis: BulletAnalysis[];
+  strengths: ResumeStrength[];
+  weaknesses: ResumeWeakness[];
+  rewrittenBullets: RewrittenBullet[];
+  smartSuggestions: SmartSuggestion[];
+  domain: DomainClassification | null;
+  formattingIssues: string[];
 }
 
+type Tab = "role-analysis" | "jd-match";
+
 export default function ResumePage() {
+  const [activeTab, setActiveTab] = useState<Tab>("role-analysis");
   const [uploading, setUploading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [uploadId, setUploadId] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
   const [targetRole, setTargetRole] = useState(ROLES[0].slug);
   const [result, setResult] = useState<AnalysisResult | null>(null);
+  const [jdResult, setJdResult] = useState<(JDMatchResult & { aiSuggestions: string }) | null>(null);
   const [error, setError] = useState("");
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
@@ -43,6 +74,7 @@ export default function ResumePage() {
     setUploading(true);
     setError("");
     setResult(null);
+    setJdResult(null);
 
     const formData = new FormData();
     formData.append("file", file);
@@ -107,6 +139,26 @@ export default function ResumePage() {
     }
   }
 
+  async function downloadReport(analysisId: string) {
+    try {
+      const res = await fetch("/api/resume/report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ analysisId }),
+      });
+      if (!res.ok) throw new Error("Failed to generate report");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `mentora-report-${targetRole}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setError("Failed to download report");
+    }
+  }
+
   function getScoreColor(score: number) {
     if (score >= 75) return "text-green-600";
     if (score >= 50) return "text-blue-600";
@@ -116,15 +168,13 @@ export default function ResumePage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">
-          Resume ATS Analyzer
-        </h1>
+        <h1 className="text-2xl font-bold text-gray-900">Resume Analyzer</h1>
         <p className="mt-1 text-gray-500">
-          Upload your resume and see how well it matches your target role
+          Deep analysis, AI-powered suggestions, and JD matching
         </p>
       </div>
 
-      {/* Upload Section */}
+      {/* Upload Section (shared between tabs) */}
       <Card>
         <CardContent className="p-6">
           <div
@@ -154,9 +204,7 @@ export default function ResumePage() {
               <div className="flex flex-col items-center gap-2">
                 <Upload className="h-8 w-8 text-gray-400" />
                 <p className="text-sm text-gray-600">
-                  <span className="font-medium text-blue-600">
-                    Click to upload
-                  </span>{" "}
+                  <span className="font-medium text-blue-600">Click to upload</span>{" "}
                   or drag and drop your resume
                 </p>
                 <p className="text-xs text-gray-400">PDF only, max 5MB</p>
@@ -166,201 +214,273 @@ export default function ResumePage() {
         </CardContent>
       </Card>
 
-      {/* Role Selection + Analyze */}
+      {/* Tabs */}
       {uploadId && (
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
-              <div className="flex-1">
-                <label className="mb-1 block text-sm font-medium text-gray-700">
-                  Target Role
-                </label>
-                <select
-                  value={targetRole}
-                  onChange={(e) => setTargetRole(e.target.value)}
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                >
-                  {ROLES.map((role) => (
-                    <option key={role.slug} value={role.slug}>
-                      {role.title}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <Button
-                onClick={handleAnalyze}
-                disabled={analyzing}
-                className="gap-2"
-              >
-                {analyzing ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Analyzing...
-                  </>
-                ) : (
-                  <>
-                    <FileText className="h-4 w-4" />
-                    Analyze Resume
-                  </>
-                )}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {error && (
-        <div className="rounded-md bg-red-50 p-4 text-sm text-red-600">
-          {error}
+        <div className="flex gap-1 rounded-lg border bg-gray-100 p-1">
+          <button
+            onClick={() => setActiveTab("role-analysis")}
+            className={cn(
+              "flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-colors",
+              activeTab === "role-analysis"
+                ? "bg-white text-gray-900 shadow-sm"
+                : "text-gray-500 hover:text-gray-700"
+            )}
+          >
+            <FileText className="h-4 w-4" />
+            Role Analysis
+          </button>
+          <button
+            onClick={() => setActiveTab("jd-match")}
+            className={cn(
+              "flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-colors",
+              activeTab === "jd-match"
+                ? "bg-white text-gray-900 shadow-sm"
+                : "text-gray-500 hover:text-gray-700"
+            )}
+          >
+            <FileSearch className="h-4 w-4" />
+            JD Match
+          </button>
         </div>
       )}
 
-      {/* Analysis Results */}
-      {result && (
-        <div className="space-y-4">
-          {/* ATS Score */}
-          <Card>
-            <CardContent className="flex items-center gap-6 p-6">
-              <div
-                className={cn(
-                  "flex h-24 w-24 flex-col items-center justify-center rounded-full border-4",
-                  result.atsScore >= 75
-                    ? "border-green-300 bg-green-50"
-                    : result.atsScore >= 50
-                    ? "border-blue-300 bg-blue-50"
-                    : "border-amber-300 bg-amber-50"
-                )}
-              >
-                <span
-                  className={cn("text-3xl font-bold", getScoreColor(result.atsScore))}
-                >
-                  {result.atsScore}
-                </span>
-                <span className="text-xs text-gray-500">/ 100</span>
-              </div>
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900">
-                  ATS Readiness Score
-                </h3>
-                <p className="mt-1 text-sm text-gray-600">{result.feedback}</p>
-              </div>
-            </CardContent>
-          </Card>
+      {error && (
+        <div className="rounded-md bg-red-50 p-4 text-sm text-red-600">{error}</div>
+      )}
 
-          {/* Section Detection */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Section Detection</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {result.sectionScores.map((section) => (
-                  <div
-                    key={section.section}
-                    className={cn(
-                      "flex items-center gap-2 rounded-lg p-3",
-                      section.found
-                        ? "bg-green-50 text-green-700"
-                        : "bg-red-50 text-red-700"
-                    )}
-                  >
-                    {section.found ? (
-                      <CheckCircle2 className="h-4 w-4" />
-                    ) : (
-                      <XCircle className="h-4 w-4" />
-                    )}
-                    <span className="text-sm font-medium capitalize">
-                      {section.section}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Keyword Matches */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Keyword Coverage</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="mb-3">
-                <Progress
-                  value={
-                    (result.keywordMatches.filter((k) => k.found).length /
-                      result.keywordMatches.length) *
-                    100
-                  }
-                />
-                <p className="mt-1 text-xs text-gray-500">
-                  {result.keywordMatches.filter((k) => k.found).length} of{" "}
-                  {result.keywordMatches.length} keywords found
-                </p>
-              </div>
-              <div className="space-y-2">
-                {result.keywordMatches.map((match) => (
-                  <div
-                    key={match.skill}
-                    className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2"
-                  >
-                    <div className="flex items-center gap-2">
-                      {match.found ? (
-                        <CheckCircle2 className="h-4 w-4 text-green-500" />
-                      ) : (
-                        <XCircle className="h-4 w-4 text-red-400" />
-                      )}
-                      <span className="text-sm">{match.skill}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Badge
-                        variant="outline"
-                        className={cn(
-                          "text-[10px]",
-                          match.found
-                            ? "border-green-200 text-green-600"
-                            : "border-red-200 text-red-500"
-                        )}
-                      >
-                        {match.matchType}
-                      </Badge>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Suggestions */}
-          {result.suggestions.length > 0 && (
+      {/* ── Tab: Role Analysis ── */}
+      {activeTab === "role-analysis" && (
+        <>
+          {/* Role Selection + Analyze */}
+          {uploadId && (
             <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Lightbulb className="h-5 w-5 text-amber-500" />
-                  Improvement Suggestions
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  {result.suggestions.map((suggestion, i) => (
-                    <div key={i} className="flex items-start gap-3">
-                      <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-500" />
-                      <p className="text-sm text-gray-700">{suggestion}</p>
-                    </div>
-                  ))}
+              <CardContent className="p-6">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
+                  <div className="flex-1">
+                    <label className="mb-1 block text-sm font-medium text-gray-700">
+                      Target Role
+                    </label>
+                    <select
+                      value={targetRole}
+                      onChange={(e) => setTargetRole(e.target.value)}
+                      className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    >
+                      {ROLES.map((role) => (
+                        <option key={role.slug} value={role.slug}>
+                          {role.title}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <Button onClick={handleAnalyze} disabled={analyzing} className="gap-2">
+                    {analyzing ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Analyzing...
+                      </>
+                    ) : (
+                      <>
+                        <FileText className="h-4 w-4" />
+                        Analyze Resume
+                      </>
+                    )}
+                  </Button>
                 </div>
               </CardContent>
             </Card>
           )}
+
+          {/* Analysis Results */}
+          {result && (
+            <div className="space-y-4">
+              {/* ATS Score + Domain + Download */}
+              <Card>
+                <CardContent className="p-6">
+                  <div className="flex items-center gap-6">
+                    <div
+                      className={cn(
+                        "flex h-24 w-24 shrink-0 flex-col items-center justify-center rounded-full border-4",
+                        result.atsScore >= 75
+                          ? "border-green-300 bg-green-50"
+                          : result.atsScore >= 50
+                            ? "border-blue-300 bg-blue-50"
+                            : "border-amber-300 bg-amber-50"
+                      )}
+                    >
+                      <span className={cn("text-3xl font-bold", getScoreColor(result.atsScore))}>
+                        {result.atsScore}
+                      </span>
+                      <span className="text-xs text-gray-500">/ 100</span>
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <h3 className="text-lg font-semibold text-gray-900">ATS Readiness Score</h3>
+                      <p className="mt-1 text-sm text-gray-600">{result.feedback}</p>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        {result.domain && <DomainBadge domain={result.domain} />}
+                        <button
+                          onClick={() => downloadReport(result.id)}
+                          className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 bg-white px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50"
+                        >
+                          <FileText className="h-3 w-3" />
+                          Download Report
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  {result.formattingIssues.length > 0 && (
+                    <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3">
+                      <p className="text-xs font-medium text-amber-800">Formatting Issues:</p>
+                      <ul className="mt-1 space-y-0.5">
+                        {result.formattingIssues.map((issue, i) => (
+                          <li key={i} className="text-xs text-amber-700">• {issue}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Strengths & Weaknesses (NEW) */}
+              <StrengthsWeaknesses
+                strengths={result.strengths}
+                weaknesses={result.weaknesses}
+              />
+
+              {/* Bullet Analysis (NEW) */}
+              <BulletAnalysisCard bullets={result.bulletAnalysis} />
+
+              {/* AI-Rewritten Bullets (NEW) */}
+              <RewrittenBullets bullets={result.rewrittenBullets} />
+
+              {/* Smart Suggestions (NEW) */}
+              <SmartSuggestions suggestions={result.smartSuggestions} />
+
+              {/* Section Detection */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Section Detection</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    {result.sectionScores.map((section) => (
+                      <div
+                        key={section.section}
+                        className={cn(
+                          "flex items-center gap-2 rounded-lg p-3",
+                          section.found
+                            ? "bg-green-50 text-green-700"
+                            : "bg-red-50 text-red-700"
+                        )}
+                      >
+                        {section.found ? (
+                          <CheckCircle2 className="h-4 w-4" />
+                        ) : (
+                          <XCircle className="h-4 w-4" />
+                        )}
+                        <span className="text-sm font-medium capitalize">
+                          {section.section}
+                        </span>
+                        {section.found && section.score < 50 && (
+                          <span className="ml-auto text-xs text-amber-600">Needs work</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Keyword Matches */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Keyword Coverage</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="mb-3">
+                    <Progress
+                      value={
+                        (result.keywordMatches.filter((k) => k.found).length /
+                          result.keywordMatches.length) *
+                        100
+                      }
+                    />
+                    <p className="mt-1 text-xs text-gray-500">
+                      {result.keywordMatches.filter((k) => k.found).length} of{" "}
+                      {result.keywordMatches.length} keywords found
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    {result.keywordMatches.map((match) => (
+                      <div
+                        key={match.skill}
+                        className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2"
+                      >
+                        <div className="flex items-center gap-2">
+                          {match.found ? (
+                            <CheckCircle2 className="h-4 w-4 text-green-500" />
+                          ) : (
+                            <XCircle className="h-4 w-4 text-red-400" />
+                          )}
+                          <span className="text-sm">{match.skill}</span>
+                        </div>
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "text-[10px]",
+                            match.found
+                              ? "border-green-200 text-green-600"
+                              : "border-red-200 text-red-500"
+                          )}
+                        >
+                          {match.matchType}
+                        </Badge>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Basic Suggestions */}
+              {result.suggestions.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-base">
+                      <Lightbulb className="h-5 w-5 text-amber-500" />
+                      Quick Fixes
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      {result.suggestions.map((suggestion, i) => (
+                        <div key={i} className="flex items-start gap-3">
+                          <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-500" />
+                          <p className="text-sm text-gray-700">{suggestion}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ── Tab: JD Match ── */}
+      {activeTab === "jd-match" && (
+        <div className="space-y-4">
+          <JDInput
+            uploadId={uploadId}
+            onResult={(data) => setJdResult(data as JDMatchResult & { aiSuggestions: string })}
+          />
+          {jdResult && <JDMatchCard result={jdResult} />}
         </div>
       )}
 
-      {/* Tips */}
+      {/* Tips (when no upload) */}
       {!result && !uploadId && (
         <Card className="border-blue-100 bg-blue-50">
           <CardContent className="p-4">
-            <h3 className="text-sm font-semibold text-blue-900">
-              Tips for better results
-            </h3>
+            <h3 className="text-sm font-semibold text-blue-900">Tips for better results</h3>
             <ul className="mt-2 space-y-1 text-sm text-blue-700">
               <li>Use a single-page PDF resume</li>
               <li>Include sections: Education, Skills, Projects, Experience</li>

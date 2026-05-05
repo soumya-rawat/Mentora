@@ -1,104 +1,151 @@
 import { KeywordMatch, RoleDefinition } from "@/types";
+import { SKILL_SYNONYMS } from "@/lib/constants/skills-database";
 
-const SKILL_SYNONYMS: Record<string, string[]> = {
-  "React": ["ReactJS", "React.js", "React JS"],
-  "Node.js": ["NodeJS", "Node JS", "Node"],
-  "PostgreSQL": ["Postgres", "psql"],
-  "MongoDB": ["Mongo", "Mongo DB"],
-  "Machine Learning": ["ML", "machine-learning"],
-  "AWS": ["Amazon Web Services", "Amazon AWS"],
-  "CI/CD": ["CICD", "CI CD", "continuous integration", "continuous deployment", "Jenkins", "GitHub Actions"],
-  "Docker": ["Containerization", "docker-compose"],
-  "Kubernetes": ["K8s", "k8s"],
-  "Python": ["python3", "Python3"],
-  "JavaScript": ["JS", "ECMAScript", "ES6"],
-  "TypeScript": ["TS"],
-  "HTML/CSS": ["HTML", "CSS", "HTML5", "CSS3"],
-  "SQL": ["MySQL", "PostgreSQL", "Postgres", "SQLite", "MSSQL"],
-  "Git": ["GitHub", "GitLab", "Bitbucket", "version control"],
-  "REST APIs": ["REST", "RESTful", "API development", "API design"],
-  "Testing": ["unit testing", "integration testing", "test automation", "Jest", "Mocha", "pytest"],
-  "Selenium": ["Cypress", "Playwright", "test automation"],
-  "Figma": ["Adobe XD", "Sketch", "UI design tool"],
-  "Tableau": ["Power BI", "data visualization tool", "Looker"],
-  "Excel": ["Google Sheets", "spreadsheet"],
-  "Linux": ["Ubuntu", "CentOS", "RedHat", "Unix"],
-  "Bash/Shell": ["shell scripting", "bash scripting"],
-  "Spark": ["Apache Spark", "PySpark"],
-  "Airflow": ["Apache Airflow"],
-  "TensorFlow/PyTorch": ["TensorFlow", "PyTorch", "Keras", "deep learning framework"],
-  "Statistics": ["statistical analysis", "probability", "regression"],
-  "Data Visualization": ["data viz", "charts", "dashboards", "visualization"],
-  "Communication": ["presentation", "stakeholder management", "client communication"],
-  "Networking": ["TCP/IP", "DNS", "HTTP", "network protocols", "OSI model"],
-  "Security": ["cybersecurity", "information security", "infosec", "penetration testing", "OWASP"],
-  "Firewalls/IDS": ["firewall", "IDS", "IPS", "intrusion detection"],
-  "Cryptography": ["encryption", "hashing", "SSL/TLS", "PKI"],
-  "Database Design": ["schema design", "data modeling", "ER diagram", "normalization"],
-  "ETL": ["data pipeline", "data ingestion", "extract transform load"],
-  "A/B Testing": ["experimentation", "split testing"],
-  "Business Acumen": ["business analysis", "business intelligence", "BI"],
-  "Performance Optimization": ["web performance", "lighthouse", "core web vitals", "lazy loading"],
-  "Responsive Design": ["responsive", "mobile-first", "media queries", "adaptive design"],
-  "System Design": ["architecture", "scalability", "distributed systems", "microservices"],
-  "Authentication": ["auth", "OAuth", "JWT", "SSO", "SAML"],
-  "Monitoring": ["Grafana", "Prometheus", "Datadog", "observability", "logging"],
-  "Terraform": ["infrastructure as code", "IaC", "CloudFormation"],
-  "User Research": ["user interviews", "usability testing", "UX research"],
-  "Wireframing": ["wireframes", "mockups", "low-fidelity design"],
-  "Visual Design": ["UI design", "graphic design", "typography", "color theory"],
-  "Prototyping": ["interactive prototype", "high-fidelity design"],
-  "Design Systems": ["component library", "style guide", "design tokens"],
-};
+// Phrases that indicate DEMONSTRATED skill (used in context, not just listed)
+const DEMONSTRATED_PATTERNS = [
+  "built with", "developed using", "implemented in", "deployed with",
+  "created using", "architected with", "engineered using", "integrated",
+  "configured", "set up", "designed with", "automated using", "migrated to",
+];
+
+// Phrases that indicate weak/surface mention
+const SURFACE_PATTERNS = [
+  "familiar with", "basic knowledge", "learning", "exposure to",
+  "awareness of", "introduction to", "beginner in", "some experience",
+];
+
+// Phrases that indicate strong proficiency
+const PROFICIENCY_PATTERNS = [
+  "proficient in", "expert in", "advanced", "extensive experience",
+  "strong in", "deep understanding", "3+ years", "2+ years",
+];
+
+export interface EnhancedKeywordMatch extends KeywordMatch {
+  demonstrated: boolean;
+  proficiencySignal: "strong" | "moderate" | "surface" | "listed-only" | "not-found";
+}
+
+/**
+ * Matches resume keywords against a role definition's skills.
+ * Now includes context-aware proficiency detection.
+ */
+/**
+ * Word-boundary safe matching — prevents "Java" matching "JavaScript".
+ */
+function wordBoundaryMatch(text: string, term: string): boolean {
+  try {
+    const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const regex = new RegExp(`\\b${escaped}\\b`, "i");
+    return regex.test(text);
+  } catch {
+    return text.toLowerCase().includes(term.toLowerCase());
+  }
+}
 
 export function matchKeywords(
   resumeText: string,
   role: RoleDefinition
-): KeywordMatch[] {
+): EnhancedKeywordMatch[] {
   const lowerText = resumeText.toLowerCase();
 
   return role.skills.map((skill) => {
-    // Try exact match
-    if (lowerText.includes(skill.name.toLowerCase())) {
-      return {
-        skill: skill.name,
-        found: true,
-        matchType: "exact" as const,
-        weight: skill.weight,
-      };
-    }
+    // Try exact match with word boundaries
+    const exactFound = wordBoundaryMatch(resumeText, skill.name);
 
-    // Try synonym match
+    // Try synonym match with word boundaries
     const synonyms = SKILL_SYNONYMS[skill.name] || [];
     const synonymMatch = synonyms.find((syn) =>
-      lowerText.includes(syn.toLowerCase())
+      wordBoundaryMatch(resumeText, syn)
     );
 
-    if (synonymMatch) {
+    const found = exactFound || !!synonymMatch;
+    const matchType = exactFound
+      ? "exact" as const
+      : synonymMatch
+        ? "synonym" as const
+        : "missing" as const;
+
+    if (!found) {
       return {
         skill: skill.name,
-        found: true,
-        matchType: "synonym" as const,
+        found: false,
+        matchType: "missing" as const,
         weight: skill.weight,
-        context: synonymMatch,
+        demonstrated: false,
+        proficiencySignal: "not-found" as const,
       };
     }
+
+    // Context-aware analysis: is the skill demonstrated or just listed?
+    const matchedTerm = exactFound ? skill.name.toLowerCase() : synonymMatch!.toLowerCase();
+    const demonstrated = isSkillDemonstrated(lowerText, matchedTerm);
+    const proficiencySignal = inferProficiency(lowerText, matchedTerm);
 
     return {
       skill: skill.name,
-      found: false,
-      matchType: "missing" as const,
+      found: true,
+      matchType,
       weight: skill.weight,
+      context: synonymMatch || undefined,
+      demonstrated,
+      proficiencySignal,
     };
   });
 }
 
+/**
+ * Checks if a skill is demonstrated (used in projects/work) vs just listed.
+ */
+function isSkillDemonstrated(text: string, skillTerm: string): boolean {
+  // Check if the skill appears near demonstrated patterns
+  const radius = 80; // characters to look around the skill mention
+  const idx = text.indexOf(skillTerm);
+  if (idx === -1) return false;
+
+  const context = text.slice(Math.max(0, idx - radius), idx + skillTerm.length + radius);
+
+  return DEMONSTRATED_PATTERNS.some((p) => context.includes(p));
+}
+
+/**
+ * Infers proficiency level from surrounding context.
+ */
+function inferProficiency(
+  text: string,
+  skillTerm: string
+): "strong" | "moderate" | "surface" | "listed-only" {
+  const radius = 60;
+  const idx = text.indexOf(skillTerm);
+  if (idx === -1) return "listed-only";
+
+  const context = text.slice(Math.max(0, idx - radius), idx + skillTerm.length + radius);
+
+  if (PROFICIENCY_PATTERNS.some((p) => context.includes(p))) return "strong";
+  if (SURFACE_PATTERNS.some((p) => context.includes(p))) return "surface";
+  if (DEMONSTRATED_PATTERNS.some((p) => context.includes(p))) return "moderate";
+
+  return "listed-only";
+}
+
+export interface FormattingInfo {
+  hasTables: boolean;
+  hasSpecialChars: boolean;
+  bulletCount: number;
+  specialCharsFound: string[];
+  wordCount: number;
+}
+
+/**
+ * Calculates ATS score from keyword matches, resume quality signals, and formatting.
+ * Enhanced with formatting penalties from Resume-ATS.
+ */
 export function calculateATSScore(
   keywordMatches: KeywordMatch[],
   detectedSections: string[],
   hasQuantified: boolean,
   hasActionVerbs: boolean,
-  hasContactInfo: boolean
+  hasContactInfo: boolean,
+  formatting?: FormattingInfo
 ): number {
   // Keyword match score (40%)
   const totalWeight = keywordMatches.reduce((sum, k) => sum + k.weight, 0);
@@ -119,11 +166,21 @@ export function calculateATSScore(
   }
   sectionScore = Math.min(100, sectionScore);
 
-  // Formatting quality (15%)
+  // Formatting quality (15%) — with penalties
   let formatScore = 50;
   if (hasContactInfo) formatScore += 25;
   if (detectedSections.length >= 4) formatScore += 25;
-  formatScore = Math.min(100, formatScore);
+
+  // Formatting penalties (from Resume-ATS)
+  if (formatting) {
+    if (formatting.hasTables) formatScore -= 15;
+    if (formatting.hasSpecialChars) {
+      formatScore -= Math.min(formatting.specialCharsFound.length * 3, 15);
+    }
+    if (formatting.bulletCount < 5) formatScore -= 10;
+    if (formatting.wordCount > 1500) formatScore -= 10;
+  }
+  formatScore = Math.min(100, Math.max(0, formatScore));
 
   // Content quality (20%)
   let contentScore = 40;
@@ -139,4 +196,30 @@ export function calculateATSScore(
     contentScore * 0.2;
 
   return Math.round(Math.min(100, Math.max(0, total)));
+}
+
+/**
+ * Matches resume text against raw skill strings (from a JD, not a RoleDefinition).
+ * Used by the JD matching feature.
+ */
+export function matchSkillsFromList(
+  resumeText: string,
+  skills: string[]
+): { skill: string; found: boolean; demonstrated: boolean }[] {
+  const lowerText = resumeText.toLowerCase();
+
+  return skills.map((skill) => {
+    // Word-boundary match
+    let found = wordBoundaryMatch(resumeText, skill);
+
+    // Synonym match
+    if (!found) {
+      const synonyms = SKILL_SYNONYMS[skill] || [];
+      found = synonyms.some((syn) => wordBoundaryMatch(resumeText, syn));
+    }
+
+    const demonstrated = found ? isSkillDemonstrated(lowerText, skill.toLowerCase()) : false;
+
+    return { skill, found, demonstrated };
+  });
 }

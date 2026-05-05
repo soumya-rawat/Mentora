@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { uploadResume } from "@/lib/services/resume.service";
 import { unauthorized, badRequest, handleApiError } from "@/lib/utils/api-errors";
-import { PDFParse } from "pdf-parse";
 
 export async function POST(request: Request) {
   try {
@@ -20,13 +19,25 @@ export async function POST(request: Request) {
 
     let extractedText: string;
     try {
-      const pdf = new PDFParse({ data: new Uint8Array(buffer) });
-      const result = await pdf.getText();
-      extractedText = result.text;
-      await pdf.destroy();
+      extractedText = await extractPdfText(buffer);
     } catch (err) {
       console.error("PDF parse error:", err);
       return badRequest("Could not parse PDF. Please ensure it is a valid PDF file.");
+    }
+
+    // OCR fallback for image-based PDFs
+    if (!extractedText || extractedText.trim().length < 100) {
+      try {
+        const { shouldAttemptOCR, extractTextWithOCR } = await import("@/lib/utils/ocr-service");
+        if (shouldAttemptOCR(extractedText || "")) {
+          const ocrResult = await extractTextWithOCR(buffer);
+          if (ocrResult.text.length > extractedText.length) {
+            extractedText = ocrResult.text;
+          }
+        }
+      } catch (ocrErr) {
+        console.error("OCR fallback failed:", ocrErr);
+      }
     }
 
     if (!extractedText || extractedText.trim().length < 50) {
@@ -48,4 +59,10 @@ export async function POST(request: Request) {
   } catch (error) {
     return handleApiError(error);
   }
+}
+
+async function extractPdfText(buffer: Buffer): Promise<string> {
+  const { extractText } = await import("unpdf");
+  const result = await extractText(new Uint8Array(buffer));
+  return Array.isArray(result.text) ? result.text.join("\n") : result.text;
 }

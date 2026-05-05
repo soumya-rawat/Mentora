@@ -126,6 +126,133 @@ export interface ResumeAnalysisResult {
   feedback: string;
 }
 
+// ── Domain Classification ─────────────────────────────────────
+
+export interface DomainClassification {
+  primary: string;
+  confidence: number;
+  secondary: string | null;
+  keywordsMatched: string[];
+}
+
+// ── Resume Analysis v2 Types ──────────────────────────────────
+
+export interface BulletAnalysis {
+  text: string;
+  scores: {
+    impact: number;      // 0-100: quantified results, metrics
+    specificity: number; // 0-100: names tools/tech, not vague
+    action: number;      // 0-100: strong action verb start
+    clarity: number;     // 0-100: appropriate length, no filler
+  };
+  overall: number;
+  rating: "strong" | "adequate" | "weak";
+  issues: string[];
+}
+
+export interface ResumeStrength {
+  area: string;
+  description: string;
+  signal: "strong" | "moderate";
+}
+
+export interface ResumeWeakness {
+  area: string;
+  description: string;
+  severity: "critical" | "moderate" | "minor";
+  suggestion: string;
+}
+
+export interface SectionContent {
+  name: string;
+  rawText: string;
+  bullets: string[];
+}
+
+export interface ResumeFormatting {
+  hasTables: boolean;
+  hasSpecialChars: boolean;
+  bulletCount: number;
+  specialCharsFound: string[];
+  wordCount: number;
+}
+
+export interface ParsedResumeV2 {
+  text: string;
+  wordCount: number;
+  detectedSections: string[];
+  sections: SectionContent[];
+  hasQuantifiedAchievements: boolean;
+  hasActionVerbs: boolean;
+  hasContactInfo: boolean;
+  links: { type: string; url: string }[];
+  formatting: ResumeFormatting;
+}
+
+export interface SectionAnalysis {
+  section: string;
+  found: boolean;
+  score: number;         // 0-100
+  feedback: string;
+  details: string[];     // specific observations
+}
+
+// ── JD Matching Types ─────────────────────────────────────────
+
+export interface ParsedJobDescription {
+  title: string | null;
+  company: string | null;
+  requiredSkills: string[];
+  preferredSkills: string[];
+  experienceLevel: string | null;
+  responsibilities: string[];
+  rawText: string;
+}
+
+export interface JDSkillMatch {
+  skill: string;
+  required: boolean;
+  found: boolean;
+  demonstrated: boolean;
+  context?: string;
+}
+
+export interface JDMatchResult {
+  matchScore: number;
+  matchedSkills: JDSkillMatch[];
+  missingSkills: string[];
+  weakSkills: string[];
+  experienceMatch: boolean;
+  summary: string;
+}
+
+// ── AI Enhancement Types ──────────────────────────────────────
+
+export interface RewrittenBullet {
+  original: string;
+  rewritten: string;
+  explanation: string;
+}
+
+export interface SmartSuggestion {
+  category: "add" | "remove" | "rewrite" | "reposition";
+  section: string;
+  suggestion: string;
+  priority: "high" | "medium" | "low";
+}
+
+// ── Enhanced Analysis Result ──────────────────────────────────
+
+export interface ResumeAnalysisResultV2 extends ResumeAnalysisResult {
+  bulletAnalysis: BulletAnalysis[];
+  strengths: ResumeStrength[];
+  weaknesses: ResumeWeakness[];
+  rewrittenBullets: RewrittenBullet[];
+  smartSuggestions: SmartSuggestion[];
+  domain: DomainClassification | null;
+  formattingIssues: string[];
+}
+
 export interface DashboardStats {
   currentStreak: number;
   longestStreak: number;
